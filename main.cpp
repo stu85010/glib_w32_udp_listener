@@ -51,7 +51,7 @@ void socket_hook_pollfd(GSocket *socket)
 #endif
 }
 
-void socket_hook_callback(GSocket *socket)
+void socket_hook_callback(GSocket *socket, GMainContext *context)
 {
 	gint fd = g_socket_get_fd(socket);
 	GSource *source;
@@ -67,7 +67,7 @@ void socket_hook_callback(GSocket *socket)
 #endif
 	source = g_socket_create_source(socket, G_IO_IN, NULL);
 	g_source_set_callback(source, (GSourceFunc)udp_received, NULL, NULL);
-	g_source_attach(source, NULL);
+	g_source_attach(source, context);
 }
 
 // https://stackoverflow.com/questions/18291284/handle-ctrlc-on-win32
@@ -152,8 +152,14 @@ int main(std::vector<std::string> args)
 	g_object_unref(socket_address);
 	g_object_unref(address);
 	
+	GMainContext *context = NULL;
+#if 0
+	context = g_main_context_new();
+#endif
+	if (context) g_main_context_ref(context);
+
 	//socket_hook_pollfd(socket);
-	socket_hook_callback(socket);
+	socket_hook_callback(socket, context);
 
 	g_socket_set_blocking(socket, FALSE);
 	g_socket_set_broadcast(socket, TRUE);
@@ -164,21 +170,17 @@ int main(std::vector<std::string> args)
 	}
 
 	GSource *source = g_timeout_source_new(100);
-	//GMainContext *context = g_main_context_default();
-	//GMainContext *context = g_main_context_new();
-	//loop = g_main_loop_new(context, FALSE);
-	loop = g_main_loop_new(NULL, FALSE);
+	loop = g_main_loop_new(context, FALSE);
 	g_main_loop_ref(loop);
 
 	//set the callback for this source
 	g_source_set_callback(source, timeout_callback, loop, NULL);
 
-	//g_source_attach(source, context);
-	g_source_attach(source, NULL);
+	g_source_attach(source, context);
 
 	g_main_loop_run(loop);
 	g_main_loop_unref(loop);
-	//g_object_unref(context);
+	if (context) g_main_context_unref(context);
 	g_source_unref(source);
 
 	std::cout << "end of UDP socket listener!" << std::endl;
