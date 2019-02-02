@@ -153,7 +153,7 @@ int main(std::vector<std::string> args)
 	g_object_unref(address);
 	
 	GMainContext *context = NULL;
-#if 0
+#if 1
 	context = g_main_context_new();
 #endif
 	if (context) g_main_context_ref(context);
