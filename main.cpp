@@ -14,7 +14,7 @@ using namespace std;
 
 #define LISTEN_PORT	(39217)
 
-GMainLoop *loop;
+GMainLoop *loop = NULL;
 GPollFD *poll_fds = NULL;
 
 static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer data)
@@ -152,7 +152,7 @@ int main(std::vector<std::string> args)
 	g_object_unref(socket_address);
 	g_object_unref(address);
 	
-	//socket_poll_status(socket);
+	//socket_hook_pollfd(socket);
 	socket_hook_callback(socket);
 
 	g_socket_set_blocking(socket, FALSE);
