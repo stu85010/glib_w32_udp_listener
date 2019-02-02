@@ -158,8 +158,8 @@ int main(std::vector<std::string> args)
 #endif
 	if (context) g_main_context_ref(context);
 
-	//socket_hook_pollfd(socket);
-	socket_hook_callback(socket, context);
+	socket_hook_pollfd(socket);
+	//socket_hook_callback(socket, context);
 
 	g_socket_set_blocking(socket, FALSE);
 	g_socket_set_broadcast(socket, TRUE);
