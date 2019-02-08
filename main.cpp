@@ -1,6 +1,9 @@
 
+
+#ifdef _MSC_VER
 #define _WINSOCKAPI_
 #include <windows.h>
+#endif
 
 #include <string>
 #include <vector>
@@ -37,7 +40,7 @@ static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer dat
 }
 
 #pragma region FIXED_WIN32_POLL
-
+#ifdef _MSC_VER
 #include <WinSock2.h>
 #if 1
 typedef struct _GIOWin32Channel GIOWin32Channel;
@@ -265,7 +268,7 @@ void fixed_g_io_channel_win32_make_pollfd(GIOChannel   *channel,
 {
 }
 #endif
-
+#endif // #ifdef _MSC_VER
 #pragma endregion
 
 void socket_hook_pollfd(GSocket *socket)
@@ -307,6 +310,7 @@ void socket_hook_callback(GSocket *socket, GMainContext *context)
 	g_source_attach(source, context);
 }
 
+#ifdef _MSC_VER
 // https://stackoverflow.com/questions/18291284/handle-ctrlc-on-win32
 BOOL WINAPI consoleHandler(DWORD dwCtrlType)
 {
@@ -330,6 +334,7 @@ BOOL WINAPI consoleHandler(DWORD dwCtrlType)
 
 	return FALSE;
 }
+#endif
 
 void print_buffer(char *buf, int length)
 {
@@ -362,10 +367,11 @@ gboolean timeout_callback(gpointer data)
 
 			std::cout << "poll not zero, ret: " << ret << std::endl;
 			do {
+				printf("events: %X, revents: %X\n", poll_fds->events, poll_fds->revents);
 				g_socket_set_blocking(_socket, FALSE);
-				//recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
 				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, &err);
-				recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
 				g_socket_set_blocking(_socket, TRUE);
 
 				if (err) {
@@ -386,7 +392,7 @@ gboolean timeout_callback(gpointer data)
 	return TRUE;
 }
 
-int main(std::vector<std::string> args)
+int main(int argc, char *argv[])
 {
 	std::cout << "This is UDP socket listener!!" << std::endl;
 
@@ -432,10 +438,12 @@ int main(std::vector<std::string> args)
 	g_socket_set_blocking(socket, FALSE);
 	g_socket_set_broadcast(socket, TRUE);
 
+#ifdef _MSC_VER
 	if (!SetConsoleCtrlHandler(consoleHandler, TRUE)) {
 		printf("\nERROR: Could not set control handler");
 		return 1;
 	}
+#endif
 
 	GSource *source = g_timeout_source_new(100);
 	loop = g_main_loop_new(context, FALSE);
