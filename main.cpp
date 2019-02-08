@@ -16,6 +16,8 @@ using namespace std;
 
 GMainLoop *loop = NULL;
 GPollFD *poll_fds = NULL;
+#define SOCKET_RECEV_BUFFER_SIZE	(1024)
+GSocket *_socket = NULL;
 
 static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer data)
 {
@@ -122,6 +124,44 @@ struct _GIOWin32Watch {
 	GIOCondition  condition;
 };
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+static const char *
+event_mask_to_string(int mask)
+{
+	char buf[100];
+	int checked_bits = 0;
+	char *bufp = buf;
+
+	if (mask == 0)
+		return "";
+
+#define BIT(n) checked_bits |= FD_##n; if (mask & FD_##n) bufp += sprintf (bufp, "%s" #n, (bufp>buf ? "|" : ""))
+
+	BIT(READ);
+	BIT(WRITE);
+	BIT(OOB);
+	BIT(ACCEPT);
+	BIT(CONNECT);
+	BIT(CLOSE);
+	BIT(QOS);
+	BIT(GROUP_QOS);
+	BIT(ROUTING_INTERFACE_CHANGE);
+	BIT(ADDRESS_LIST_CHANGE);
+
+#undef BIT
+
+	if ((mask & ~checked_bits) != 0)
+		bufp += sprintf(bufp, "|%#x", mask & ~checked_bits);
+
+	return g_quark_to_string(g_quark_from_string(buf));
+}
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 void fixed_g_io_channel_win32_make_pollfd(GIOChannel   *channel,
 	GIOCondition  condition,
 	GPollFD      *fd)
@@ -156,7 +196,55 @@ void fixed_g_io_channel_win32_make_pollfd(GIOChannel   *channel,
 	//	break;
 
 	case G_IO_WIN32_SOCKET:
+#if 0
 		fd->fd = (gintptr)WSACreateEvent();
+#else
+		if (win32_channel->event == WSA_INVALID_EVENT)
+			win32_channel->event = WSACreateEvent();
+
+		fd->fd = (gintptr)win32_channel->event;
+
+		if (fd->fd == (gintptr)WSA_INVALID_EVENT) {
+			gchar *emsg = g_win32_error_message(GetLastError());
+			g_error("Error creating event: %s", emsg);
+			g_free(emsg);
+		} else {
+			int event_mask = 0;
+
+			if (condition & G_IO_IN)
+				event_mask |= (FD_READ | FD_ACCEPT);
+			if (condition & G_IO_OUT)
+				event_mask |= (FD_WRITE | FD_CONNECT);
+			event_mask |= FD_CLOSE;
+
+			ResetEvent((WSAEVENT)fd->fd);
+
+			if (win32_channel->debug)
+				g_print("WSAEventSelect(%d,%p,{%s})",
+					win32_channel->fd, (HANDLE)fd->fd,
+					event_mask_to_string(event_mask));
+			if (WSAEventSelect(win32_channel->fd, (HANDLE)fd->fd,
+				event_mask) == SOCKET_ERROR)
+				if (win32_channel->debug)
+				{
+					gchar *emsg = g_win32_error_message(WSAGetLastError());
+
+					g_print(" failed: %s", emsg);
+					g_free(emsg);
+				}
+			if (win32_channel->debug)
+				g_print("\n");
+
+			if ((event_mask & FD_WRITE) &&
+				win32_channel->ever_writable &&
+				!win32_channel->write_would_have_blocked)
+			{
+				if (win32_channel->debug)
+					g_print("WSASetEvent(%p)\n", (WSAEVENT)fd->fd);
+				WSASetEvent((WSAEVENT)fd->fd);
+			}
+		}
+#endif	
 		break;
 
 	case G_IO_WIN32_WINDOWS_MESSAGES:
@@ -183,6 +271,8 @@ void fixed_g_io_channel_win32_make_pollfd(GIOChannel   *channel,
 void socket_hook_pollfd(GSocket *socket)
 {
 	gint fd = g_socket_get_fd(socket);
+	
+	_socket = socket;
 	poll_fds = g_new(GPollFD, 1);
 
 #ifdef _MSC_VER
@@ -240,6 +330,15 @@ BOOL WINAPI consoleHandler(DWORD dwCtrlType)
 
 	return FALSE;
 }
+
+void print_buffer(char *buf, int length)
+{
+	for (int i = 0; i < length; i++) {
+		printf("%c", buf[i]);
+	}
+	fflush(stdout);
+}
+
 gboolean timeout_callback(gpointer data)
 {
 	static int isConnected = 0;
@@ -249,15 +348,37 @@ gboolean timeout_callback(gpointer data)
 			//std::cout << "use poll!" << std::endl;
 			isConnected = 1;
 		}
-		//ret = g_poll(poll_fds, 1, 90);
-		ret = g_io_channel_win32_poll(poll_fds, 1, 90);
+		ret = g_poll(poll_fds, 1, 90);
+		//ret = g_io_channel_win32_poll(poll_fds, 1, 90);
 
 		if (ret == 0) {
 			//std::cout << "poll zero" << std::endl;
 
-		}
-		else {
+		} else {
+			char buffer[SOCKET_RECEV_BUFFER_SIZE];
+			int recv_len = 0;
+			GSocketAddress *address;
+			GError *err = NULL;
+
 			std::cout << "poll not zero, ret: " << ret << std::endl;
+			do {
+				g_socket_set_blocking(_socket, FALSE);
+				//recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, &err);
+				recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				g_socket_set_blocking(_socket, TRUE);
+
+				if (err) {
+					g_error(err->message);
+				}
+
+				if (recv_len > 0) {
+					std::cout << "received length: " << recv_len << ", you got [" << std::endl;
+					print_buffer(buffer, recv_len);
+				}
+				std::cout << "]." << std::endl;
+			} while (recv_len > 0);
+
 
 		}
 
