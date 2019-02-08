@@ -21,3 +21,4 @@ And I am trying to figure out what can I do for Aravis porting for Windows. I'm 
 - [ ] Make a g_poll-like feature, replacing the g_poll code in Aravis
 - [ ] Integrating "GSource + GMainLoop" in Aravis for Windows build
 - [ ] UDP receiving by other polling method
+- [ ] Complete the g_io_channel_win32_make_pollfd in GLib like LRN comment on the [thread](https://gitlab.gnome.org/GNOME/glib/issues/214#note_263930)
