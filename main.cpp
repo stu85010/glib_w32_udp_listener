@@ -441,6 +441,7 @@ int main(int argc, char *argv[])
 	//cout << "putenv result: " << result << endl;
 
 	//GInetAddress *address = g_inet_address_new_from_string("127.0.0.1");
+	//GInetAddress *address = g_inet_address_new_from_string("192.168.0.9"); // ip from LAN
 	GInetAddress *address = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
 	GSocketAddress *socket_address = g_inet_socket_address_new(address, LISTEN_PORT);
 	GError *error = NULL;
@@ -458,6 +459,7 @@ int main(int argc, char *argv[])
 		g_message("Socket creation ok");
 	}
 
+	g_socket_set_broadcast(socket, TRUE);
 	if (g_socket_bind(socket, socket_address, FALSE, &error) == FALSE) {
 		if (error) {
 			g_error(error->message);
