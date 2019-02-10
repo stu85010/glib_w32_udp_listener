@@ -5,6 +5,7 @@
 #include <windows.h>
 #endif
 
+#include <stdlib.h>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -21,11 +22,16 @@ GMainLoop *loop = NULL;
 GPollFD *poll_fds = NULL;
 #define SOCKET_RECEV_BUFFER_SIZE	(1024)
 GSocket *_socket = NULL;
+GIOChannel *_channel = NULL;
+int task_should_exit = 0;
+
+#define G_SOURCE_METHOD	(0)
+#define G_POLL_METHOD	(1)
 
 static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer data)
 {
 	char buf[1024];
-	gsize bytes_read;
+	gsize bytes_read = 0;
 	GSocketAddress *address;
 	GError *err = NULL;
 
@@ -34,8 +40,10 @@ static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer dat
 	bytes_read = g_socket_receive_from(sock, &address, buf, sizeof(buf), NULL, &err);
 	g_assert(err == NULL);
 
-	g_print("UDP received %d bytes\n[%s]\n", bytes_read, buf);
-	
+	g_print("UDP callback\n");
+	if (bytes_read>0)
+		g_print("UDP received %d bytes\n[%s]\n", bytes_read, buf);
+
 	return TRUE;
 }
 
@@ -282,6 +290,9 @@ void socket_hook_pollfd(GSocket *socket)
 	GIOChannel *channel = g_io_channel_win32_new_socket(fd);
 	//g_io_channel_win32_make_pollfd(channel, G_IO_IN, poll_fds);
 	fixed_g_io_channel_win32_make_pollfd(channel, G_IO_IN, poll_fds);
+	g_io_channel_ref(channel);
+	_channel = channel;
+	printf("poll fds: %X\n", poll_fds[0].fd);
 #else
 	GIOChannel *channel = g_io_channel_unix_new(fd);
 
@@ -319,6 +330,7 @@ BOOL WINAPI consoleHandler(DWORD dwCtrlType)
 	case CTRL_C_EVENT:
 		printf("Ctrl-C\n");
 		g_main_loop_quit(loop);
+		task_should_exit = 1;
 		return TRUE;
 		break;
 	case CTRL_BREAK_EVENT:
@@ -327,6 +339,7 @@ BOOL WINAPI consoleHandler(DWORD dwCtrlType)
 		break;
 	case CTRL_CLOSE_EVENT:
 		printf("Close\n");
+		task_should_exit = 1;
 		break;
 	default:
 		printf("Other case: %d\n", dwCtrlType);
@@ -353,8 +366,9 @@ gboolean timeout_callback(gpointer data)
 			//std::cout << "use poll!" << std::endl;
 			isConnected = 1;
 		}
-		ret = g_poll(poll_fds, 1, 90);
-		//ret = g_io_channel_win32_poll(poll_fds, 1, 90);
+		ret = g_poll(poll_fds, 1, 1000);
+		//ret = g_io_channel_win32_poll(poll_fds, 1, 1000);
+		//ret = g_socket_condition_timed_wait(_socket, G_IO_IN, 1000, NULL, NULL);
 
 		if (ret == 0) {
 			//std::cout << "poll zero" << std::endl;
@@ -362,16 +376,33 @@ gboolean timeout_callback(gpointer data)
 		} else {
 			char buffer[SOCKET_RECEV_BUFFER_SIZE];
 			int recv_len = 0;
+			
 			GSocketAddress *address;
 			GError *err = NULL;
+			WSANETWORKEVENTS events;
+			int socket_fd = g_socket_get_fd(_socket);
+			int fd = poll_fds[0].fd;
+			if (WSAEnumNetworkEvents(socket_fd,
+				0,
+				&events) == 0) {
+				std::cout << "event: " << events.lNetworkEvents << endl;
+
+				if (events.lNetworkEvents) {
+					ResetEvent ((HANDLE) fd);
+				}
+			} else {
+				std::cout << "enum event failed" << endl;
+			}
 
 			std::cout << "poll not zero, ret: " << ret << std::endl;
 			do {
-				printf("events: %X, revents: %X\n", poll_fds->events, poll_fds->revents);
+				//printf("events: %X, revents: %X\n", poll_fds->events, poll_fds->revents);
 				g_socket_set_blocking(_socket, FALSE);
 				recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
-				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, &err);
 				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				//recv_len = g_socket_receive_from(_socket, &address, buffer, 10, NULL, NULL);
+				//_channel->funcs->io_read(_channel, buffer, 10, &recv_len, NULL);
+
 				g_socket_set_blocking(_socket, TRUE);
 
 				if (err) {
@@ -381,8 +412,9 @@ gboolean timeout_callback(gpointer data)
 				if (recv_len > 0) {
 					std::cout << "received length: " << recv_len << ", you got [" << std::endl;
 					print_buffer(buffer, recv_len);
+					std::cout << "]." << std::endl;
+					recv_len -= recv_len;
 				}
-				std::cout << "]." << std::endl;
 			} while (recv_len > 0);
 
 
@@ -392,9 +424,21 @@ gboolean timeout_callback(gpointer data)
 	return TRUE;
 }
 
+void main_loop(void)
+{
+	while (!task_should_exit) {
+		timeout_callback(NULL);
+		Sleep(100);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	std::cout << "This is UDP socket listener!!" << std::endl;
+	int result = _putenv("G_IO_WIN32_DEBUG=1");
+	//_putenv("G_MAIN_POLL_DEBUG=1");
+	
+	//cout << "putenv result: " << result << endl;
 
 	//GInetAddress *address = g_inet_address_new_from_string("127.0.0.1");
 	GInetAddress *address = g_inet_address_new_any(G_SOCKET_FAMILY_IPV4);
@@ -427,13 +471,17 @@ int main(int argc, char *argv[])
 	g_object_unref(address);
 	
 	GMainContext *context = NULL;
-#if 0
+#if 1
 	context = g_main_context_new();
 #endif
 	if (context) g_main_context_ref(context);
 
+#if (G_SOURCE_METHOD)
+	socket_hook_callback(socket, context);
+#elif (G_POLL_METHOD)
+	// G_POLL_METHOD
 	socket_hook_pollfd(socket);
-	//socket_hook_callback(socket, context);
+#endif
 
 	g_socket_set_blocking(socket, FALSE);
 	g_socket_set_broadcast(socket, TRUE);
@@ -445,7 +493,7 @@ int main(int argc, char *argv[])
 	}
 #endif
 
-	GSource *source = g_timeout_source_new(100);
+	GSource *source = g_timeout_source_new(1000);
 	loop = g_main_loop_new(context, FALSE);
 	g_main_loop_ref(loop);
 
@@ -454,12 +502,17 @@ int main(int argc, char *argv[])
 
 	g_source_attach(source, context);
 
+#if (G_SOURCE_METHOD)
 	g_main_loop_run(loop);
+#elif (G_POLL_METHOD)
+	main_loop();
+#endif
+
 	g_main_loop_unref(loop);
 	if (context) g_main_context_unref(context);
 	g_source_unref(source);
 
 	std::cout << "end of UDP socket listener!" << std::endl;
-	
+	system("pause");
 	return 0;
 }
