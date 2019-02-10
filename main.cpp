@@ -385,7 +385,7 @@ gboolean timeout_callback(gpointer data)
 			if (WSAEnumNetworkEvents(socket_fd,
 				0,
 				&events) == 0) {
-				std::cout << "event: " << events.lNetworkEvents << endl;
+				std::cout << "WSAEnumNetworkEvents event: " << events.lNetworkEvents << endl;
 
 				if (events.lNetworkEvents) {
 					ResetEvent ((HANDLE) fd);
@@ -394,14 +394,20 @@ gboolean timeout_callback(gpointer data)
 				std::cout << "enum event failed" << endl;
 			}
 
-			std::cout << "poll not zero, ret: " << ret << std::endl;
+			//std::cout << "poll not zero, ret: " << ret << std::endl;
 			do {
 				//printf("events: %X, revents: %X\n", poll_fds->events, poll_fds->revents);
 				g_socket_set_blocking(_socket, FALSE);
-				recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
-				//recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				//recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
 				//recv_len = g_socket_receive_from(_socket, &address, buffer, 10, NULL, NULL);
 				//_channel->funcs->io_read(_channel, buffer, 10, &recv_len, NULL);
+
+				GInetAddress *iaddr = g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(address));
+				int src_port = g_inet_socket_address_get_port(G_INET_SOCKET_ADDRESS(address));
+				char *addr_str = g_inet_address_to_string(iaddr);
+				std::cout << "send by: " << addr_str << ", from port:" << src_port << endl;
+				free(addr_str);
 
 				g_socket_set_blocking(_socket, TRUE);
 
@@ -410,7 +416,7 @@ gboolean timeout_callback(gpointer data)
 				}
 
 				if (recv_len > 0) {
-					std::cout << "received length: " << recv_len << ", you got [" << std::endl;
+					std::cout << "received length: " << recv_len << ", you got [";
 					print_buffer(buffer, recv_len);
 					std::cout << "]." << std::endl;
 					recv_len -= recv_len;
