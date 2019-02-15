@@ -383,13 +383,10 @@ gboolean timeout_callback(gpointer data)
 			int socket_fd = g_socket_get_fd(_socket);
 			int fd = poll_fds[0].fd;
 			if (WSAEnumNetworkEvents(socket_fd,
-				0,
+				(HANDLE) fd,
 				&events) == 0) {
 				std::cout << "WSAEnumNetworkEvents event: " << events.lNetworkEvents << endl;
 
-				if (events.lNetworkEvents) {
-					ResetEvent ((HANDLE) fd);
-				}
 			} else {
 				std::cout << "enum event failed" << endl;
 			}
