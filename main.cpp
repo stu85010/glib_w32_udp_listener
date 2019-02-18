@@ -290,7 +290,7 @@ void socket_hook_pollfd(GSocket *socket)
 	GIOChannel *channel = g_io_channel_win32_new_socket(fd);
 	//g_io_channel_win32_make_pollfd(channel, G_IO_IN, poll_fds);
 	fixed_g_io_channel_win32_make_pollfd(channel, G_IO_IN, poll_fds);
-	g_io_channel_ref(channel);
+	//g_io_channel_ref(channel);
 	_channel = channel;
 	printf("poll fds: %X\n", poll_fds[0].fd);
 #else
@@ -516,6 +516,9 @@ int main(int argc, char *argv[])
 	g_main_loop_unref(loop);
 	if (context) g_main_context_unref(context);
 	g_source_unref(source);
+	g_object_unref(socket);
+	//WSACloseEvent((HANDLE)poll_fds[0].fd);
+	g_io_channel_unref(_channel);
 
 	std::cout << "end of UDP socket listener!" << std::endl;
 	system("pause");
