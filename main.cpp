@@ -23,9 +23,11 @@ GPollFD *poll_fds = NULL;
 #define SOCKET_RECEV_BUFFER_SIZE	(1024)
 GSocket *_socket = NULL;
 GIOChannel *_channel = NULL;
+GSource *_sock_source = NULL;
 int task_should_exit = 0;
 
 #define G_SOURCE_METHOD	(0)
+#define G_SOURCE_POLL_METHOD	(1)
 #define G_POLL_METHOD	(1)
 
 static gboolean udp_received(GSocket *sock, GIOCondition condition, gpointer data)
@@ -302,6 +304,22 @@ void socket_hook_pollfd(GSocket *socket)
 #endif
 }
 
+void socket_hook_source_pollfd(GSocket *socket)
+{
+	gint fd = g_socket_get_fd(socket);
+	GSource *source;
+	source = g_socket_create_source(socket, G_IO_IN, NULL);
+	_socket = socket;
+	poll_fds = g_new(GPollFD, 1);
+
+	GPollFD *pfd = (GPollFD *)source->poll_fds[0].data;
+	poll_fds[0].fd = pfd->fd;
+	poll_fds[0].events = pfd->events;
+	poll_fds[0].revents = 0;
+	printf("poll fds: %X\n", poll_fds[0].fd);
+	_sock_source = source;
+
+}
 void socket_hook_callback(GSocket *socket, GMainContext *context)
 {
 	gint fd = g_socket_get_fd(socket);
@@ -382,6 +400,11 @@ gboolean timeout_callback(gpointer data)
 			WSANETWORKEVENTS events;
 			int socket_fd = g_socket_get_fd(_socket);
 			int fd = poll_fds[0].fd;
+#elif (G_SOURCE_POLL_METHOD)
+			// WSAEnumNetworkEvents had already inside the check method (WSAEnumNetworkEvents@update_condition@socket_source_check_win32@gsocket.c)
+			_sock_source->source_funcs->check(_sock_source);
+
+#elif (G_POLL_METHOD)
 			if (WSAEnumNetworkEvents(socket_fd,
 				(HANDLE) fd,
 				&events) == 0) {
@@ -390,13 +413,18 @@ gboolean timeout_callback(gpointer data)
 			} else {
 				std::cout << "enum event failed" << endl;
 			}
+#endif
 
-			//std::cout << "poll not zero, ret: " << ret << std::endl;
+			std::cout << "poll not zero, ret: " << ret << std::endl;
 			do {
+
+				// the g_socket_receive will call WSARecv, but not going to clear network events
+				// https://docs.microsoft.com/de-de/previous-versions/technical-content/ms741688(v%3dvs.85)
+
 				//printf("events: %X, revents: %X\n", poll_fds->events, poll_fds->revents);
 				g_socket_set_blocking(_socket, FALSE);
 				//recv_len = g_socket_receive(_socket, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
-				recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, NULL);
+				recv_len = g_socket_receive_from(_socket, &address, buffer, SOCKET_RECEV_BUFFER_SIZE, NULL, &err);
 				//recv_len = g_socket_receive_from(_socket, &address, buffer, 10, NULL, NULL);
 				//_channel->funcs->io_read(_channel, buffer, 10, &recv_len, NULL);
 
@@ -483,6 +511,8 @@ int main(int argc, char *argv[])
 
 #if (G_SOURCE_METHOD)
 	socket_hook_callback(socket, context);
+#elif (G_SOURCE_POLL_METHOD)
+	socket_hook_source_pollfd(socket);
 #elif (G_POLL_METHOD)
 	// G_POLL_METHOD
 	socket_hook_pollfd(socket);
@@ -509,6 +539,8 @@ int main(int argc, char *argv[])
 
 #if (G_SOURCE_METHOD)
 	g_main_loop_run(loop);
+#elif (G_SOURCE_POLL_METHOD)
+	main_loop();
 #elif (G_POLL_METHOD)
 	main_loop();
 #endif
